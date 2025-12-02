@@ -57,28 +57,48 @@ const AdminDashboard = () => {
     setLoading(false);
   };
 
-  const handleStatusUpdate = async (id: string, status: "approved" | "rejected" | "pending") => {
-    const { data: { user } } = await supabase.auth.getUser();
+  const handleStatusUpdate = async (id: string, status: "approved" | "rejected") => {
+    const reason = status === "rejected" ? prompt("Please provide a reason for rejection:") : null;
     
+    if (status === "rejected" && !reason) {
+      return;
+    }
+
+    // Get current user session
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (!session) {
+      toast({
+        title: "Authentication Error",
+        description: "You must be logged in to perform this action.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const updateData: any = { 
+      status,
+      rejection_reason: reason,
+      processed_by: session.user.id,
+      processed_at: new Date().toISOString(),
+    };
+
     const { error } = await supabase
       .from("document_requests")
-      .update({
-        status,
-        processed_by: user?.id,
-        processed_at: new Date().toISOString(),
-      })
+      .update(updateData)
       .eq("id", id);
 
     if (error) {
+      console.error("Update error:", error);
       toast({
         title: "Error",
-        description: "Failed to update status.",
+        description: `Failed to update request status: ${error.message}`,
         variant: "destructive",
       });
     } else {
       toast({
         title: "Success",
-        description: `Request ${status} successfully.`,
+        description: `Request ${status} successfully.${status === 'approved' ? ' A reference number has been generated.' : ''}`,
       });
       fetchRequests();
     }

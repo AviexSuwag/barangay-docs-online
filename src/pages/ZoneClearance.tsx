@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2, Upload } from "lucide-react";
 import { Link } from "react-router-dom";
 import Header from "@/components/Header";
 
@@ -16,20 +16,54 @@ const ZoneClearance = () => {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [zones, setZones] = useState<any[]>([]);
+  const [hasExistingClearance, setHasExistingClearance] = useState<string>("no");
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
 
-  useState(() => {
+  useEffect(() => {
     const fetchZones = async () => {
       const { data } = await supabase.from("zones").select("*").order("zone_number");
       if (data) setZones(data);
     };
     fetchZones();
-  });
+  }, []);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setUploadedFile(e.target.files[0]);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setLoading(true);
 
     const formData = new FormData(e.currentTarget);
+    
+    let fileUrl = null;
+    
+    // If they have existing clearance and uploaded a file, upload it to storage
+    if (hasExistingClearance === "yes" && uploadedFile) {
+      const fileExt = uploadedFile.name.split('.').pop();
+      const fileName = `${Date.now()}.${fileExt}`;
+      const filePath = `${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('zone-clearances')
+        .upload(filePath, uploadedFile);
+
+      if (uploadError) {
+        toast({
+          title: "Error",
+          description: "Failed to upload file. Please try again.",
+          variant: "destructive",
+        });
+        setLoading(false);
+        return;
+      }
+
+      fileUrl = filePath;
+    }
+
     const data = {
       first_name: formData.get("first_name") as string,
       middle_name: formData.get("middle_name") as string,
@@ -43,6 +77,8 @@ const ZoneClearance = () => {
       marital_status: formData.get("marital_status") as "single" | "married" | "widowed" | "separated",
       document_type: "zone_clearance" as const,
       purpose: formData.get("purpose") as string,
+      has_zone_clearance: hasExistingClearance === "yes",
+      zone_clearance_file_url: fileUrl,
     };
 
     const { error } = await supabase.from("document_requests").insert([data]);
@@ -160,6 +196,39 @@ const ZoneClearance = () => {
               <div className="space-y-2">
                 <Label htmlFor="purpose">Purpose *</Label>
                 <Input id="purpose" name="purpose" placeholder="e.g., Employment, School requirement" required />
+              </div>
+
+              <div className="space-y-4 p-4 border rounded-lg bg-muted/20">
+                <Label>Do you already have a valid Zone Clearance? *</Label>
+                <Select value={hasExistingClearance} onValueChange={setHasExistingClearance} required>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select an option" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="yes">Yes, I have one</SelectItem>
+                    <SelectItem value="no">No, this is my first request</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                {hasExistingClearance === "yes" && (
+                  <div className="space-y-2">
+                    <Label htmlFor="clearance_file">Upload Your Valid Zone Clearance *</Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="clearance_file"
+                        type="file"
+                        accept=".pdf,.jpg,.jpeg,.png"
+                        onChange={handleFileChange}
+                        required
+                        className="cursor-pointer"
+                      />
+                      <Upload className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Accepted formats: PDF, JPG, PNG. This will be used to verify your existing clearance.
+                    </p>
+                  </div>
+                )}
               </div>
 
               <Button type="submit" className="w-full" size="lg" disabled={loading}>

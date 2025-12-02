@@ -69,9 +69,6 @@ const Index = () => {
           <Button variant="outline" size="lg" asChild>
             <Link to="/track">Track My Request</Link>
           </Button>
-          <Button variant="outline" size="lg" asChild>
-            <Link to="/admin">Staff Login</Link>
-          </Button>
         </div>
       </main>
 
