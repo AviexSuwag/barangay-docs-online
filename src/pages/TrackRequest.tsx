@@ -13,17 +13,28 @@ import Header from "@/components/Header";
 const TrackRequest = () => {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
-  const [email, setEmail] = useState("");
+  const [searchValue, setSearchValue] = useState("");
   const [requests, setRequests] = useState<any[]>([]);
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (!searchValue.trim()) {
+      toast({
+        title: "Search Required",
+        description: "Please enter your email or phone number to track your request.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
     setLoading(true);
 
+    // Search by email OR phone number
     const { data, error } = await supabase
       .from("document_requests")
       .select("*, zones(zone_name)")
-      .eq("email", email)
+      .or(`email.eq.${searchValue},contact.eq.${searchValue}`)
       .order("request_date", { ascending: false });
 
     setLoading(false);
@@ -31,19 +42,22 @@ const TrackRequest = () => {
     if (error) {
       toast({
         title: "Error",
-        description: "Failed to fetch requests.",
+        description: "Failed to fetch requests. Please try again.",
         variant: "destructive",
       });
-    } else if (data.length === 0) {
+      return;
+    }
+
+    if (!data || data.length === 0) {
       toast({
         title: "No Requests Found",
-        description: "No requests found with this email.",
-        variant: "destructive",
+        description: "No requests found with this email or phone number.",
       });
       setRequests([]);
-    } else {
-      setRequests(data);
+      return;
     }
+
+    setRequests(data);
   };
 
   const getStatusIcon = (status: string) => {
@@ -83,20 +97,20 @@ const TrackRequest = () => {
           <CardHeader>
             <CardTitle className="text-3xl">Track Your Request</CardTitle>
             <CardDescription>
-              Enter your email to view the status of your document requests
+              Enter your email or phone number to view the status of your document requests
             </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSearch} className="space-y-4 mb-6">
               <div className="space-y-2">
-                <Label htmlFor="track_email">Email Address</Label>
+                <Label htmlFor="track_search">Email or Phone Number</Label>
                 <div className="flex gap-2">
                   <Input
-                    id="track_email"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="Enter your email"
+                    id="track_search"
+                    type="text"
+                    value={searchValue}
+                    onChange={(e) => setSearchValue(e.target.value)}
+                    placeholder="Enter your email or phone number"
                     required
                     className="flex-1"
                   />
@@ -152,6 +166,16 @@ const TrackRequest = () => {
                           <p className="font-medium">{request.contact}</p>
                         </div>
                       </div>
+
+                      {request.reference_number && (
+                        <div className="mt-4 p-4 bg-primary/10 border-2 border-primary/20 rounded-lg">
+                          <p className="text-sm font-medium mb-2">Reference Number:</p>
+                          <p className="text-2xl font-bold text-primary mb-2">{request.reference_number}</p>
+                          <p className="text-xs text-muted-foreground">
+                            Please present this reference number when claiming your document at the barangay office.
+                          </p>
+                        </div>
+                      )}
 
                       {request.status === "rejected" && request.rejection_reason && (
                         <div className="mt-4 p-3 bg-destructive/10 rounded-lg">

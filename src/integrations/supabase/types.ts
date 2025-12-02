@@ -31,10 +31,12 @@ export type Database = {
           processed_at: string | null
           processed_by: string | null
           purpose: string
+          reference_number: string | null
           rejection_reason: string | null
           request_date: string | null
           status: Database["public"]["Enums"]["request_status"] | null
           updated_at: string | null
+          zone_clearance_file_url: string | null
           zone_clearance_id: string | null
           zone_id: string | null
         }
@@ -54,10 +56,12 @@ export type Database = {
           processed_at?: string | null
           processed_by?: string | null
           purpose: string
+          reference_number?: string | null
           rejection_reason?: string | null
           request_date?: string | null
           status?: Database["public"]["Enums"]["request_status"] | null
           updated_at?: string | null
+          zone_clearance_file_url?: string | null
           zone_clearance_id?: string | null
           zone_id?: string | null
         }
@@ -77,10 +81,12 @@ export type Database = {
           processed_at?: string | null
           processed_by?: string | null
           purpose?: string
+          reference_number?: string | null
           rejection_reason?: string | null
           request_date?: string | null
           status?: Database["public"]["Enums"]["request_status"] | null
           updated_at?: string | null
+          zone_clearance_file_url?: string | null
           zone_clearance_id?: string | null
           zone_id?: string | null
         }
@@ -175,6 +181,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      generate_reference_number: { Args: never; Returns: string }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
