@@ -17,7 +17,8 @@ const ZoneClearance = () => {
   const [loading, setLoading] = useState(false);
   const [zones, setZones] = useState<any[]>([]);
   const [hasExistingClearance, setHasExistingClearance] = useState<string>("no");
-  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [existingClearanceFile, setExistingClearanceFile] = useState<File | null>(null);
+  const [validIdFile, setValidIdFile] = useState<File | null>(null);
 
   useEffect(() => {
     const fetchZones = async () => {
@@ -27,10 +28,32 @@ const ZoneClearance = () => {
     fetchZones();
   }, []);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleExistingClearanceFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setUploadedFile(e.target.files[0]);
+      setExistingClearanceFile(e.target.files[0]);
     }
+  };
+
+  const handleValidIdFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setValidIdFile(e.target.files[0]);
+    }
+  };
+
+  const uploadFile = async (file: File, folder: string): Promise<string | null> => {
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${folder}/${Date.now()}.${fileExt}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('zone-clearances')
+      .upload(fileName, file);
+
+    if (uploadError) {
+      console.error('Upload error:', uploadError);
+      return null;
+    }
+
+    return fileName;
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -39,29 +62,45 @@ const ZoneClearance = () => {
 
     const formData = new FormData(e.currentTarget);
     
-    let fileUrl = null;
+    let zoneClearanceFileUrl = null;
+    let validIdFileUrl = null;
     
-    // If they have existing clearance and uploaded a file, upload it to storage
-    if (hasExistingClearance === "yes" && uploadedFile) {
-      const fileExt = uploadedFile.name.split('.').pop();
-      const fileName = `${Date.now()}.${fileExt}`;
-      const filePath = `${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('zone-clearances')
-        .upload(filePath, uploadedFile);
-
-      if (uploadError) {
+    // If they have existing clearance, upload the clearance file
+    if (hasExistingClearance === "yes" && existingClearanceFile) {
+      zoneClearanceFileUrl = await uploadFile(existingClearanceFile, 'existing-clearances');
+      if (!zoneClearanceFileUrl) {
         toast({
           title: "Error",
-          description: "Failed to upload file. Please try again.",
+          description: "Failed to upload zone clearance file. Please try again.",
           variant: "destructive",
         });
         setLoading(false);
         return;
       }
+    }
 
-      fileUrl = filePath;
+    // If they don't have existing clearance, they must upload a valid ID
+    if (hasExistingClearance === "no") {
+      if (!validIdFile) {
+        toast({
+          title: "Valid ID Required",
+          description: "Please upload a valid ID to proceed with your request.",
+          variant: "destructive",
+        });
+        setLoading(false);
+        return;
+      }
+      
+      validIdFileUrl = await uploadFile(validIdFile, 'valid-ids');
+      if (!validIdFileUrl) {
+        toast({
+          title: "Error",
+          description: "Failed to upload valid ID. Please try again.",
+          variant: "destructive",
+        });
+        setLoading(false);
+        return;
+      }
     }
 
     const data = {
@@ -78,7 +117,8 @@ const ZoneClearance = () => {
       document_type: "zone_clearance" as const,
       purpose: formData.get("purpose") as string,
       has_zone_clearance: hasExistingClearance === "yes",
-      zone_clearance_file_url: fileUrl,
+      zone_clearance_file_url: zoneClearanceFileUrl,
+      valid_id_file_url: validIdFileUrl,
     };
 
     const { error } = await supabase.from("document_requests").insert([data]);
@@ -94,7 +134,7 @@ const ZoneClearance = () => {
     } else {
       toast({
         title: "Success!",
-        description: "Your zone clearance request has been submitted.",
+        description: "Your zone clearance request has been submitted. You will receive a reference number once approved.",
       });
       navigate("/");
     }
@@ -212,13 +252,13 @@ const ZoneClearance = () => {
 
                 {hasExistingClearance === "yes" && (
                   <div className="space-y-2">
-                    <Label htmlFor="clearance_file">Upload Your Valid Zone Clearance *</Label>
+                    <Label htmlFor="existing_clearance_file">Upload Your Valid Zone Clearance *</Label>
                     <div className="flex items-center gap-2">
                       <Input
-                        id="clearance_file"
+                        id="existing_clearance_file"
                         type="file"
                         accept=".pdf,.jpg,.jpeg,.png"
-                        onChange={handleFileChange}
+                        onChange={handleExistingClearanceFileChange}
                         required
                         className="cursor-pointer"
                       />
@@ -226,6 +266,26 @@ const ZoneClearance = () => {
                     </div>
                     <p className="text-xs text-muted-foreground">
                       Accepted formats: PDF, JPG, PNG. This will be used to verify your existing clearance.
+                    </p>
+                  </div>
+                )}
+
+                {hasExistingClearance === "no" && (
+                  <div className="space-y-2">
+                    <Label htmlFor="valid_id_file">Upload a Valid ID *</Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="valid_id_file"
+                        type="file"
+                        accept=".pdf,.jpg,.jpeg,.png"
+                        onChange={handleValidIdFileChange}
+                        required
+                        className="cursor-pointer"
+                      />
+                      <Upload className="h-5 w-5 text-muted-foreground" />
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Accepted formats: PDF, JPG, PNG. Upload any valid government ID (e.g., National ID, Driver's License, Passport, Voter's ID).
                     </p>
                   </div>
                 )}
