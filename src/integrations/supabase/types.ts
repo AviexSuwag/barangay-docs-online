@@ -36,6 +36,7 @@ export type Database = {
           request_date: string | null
           status: Database["public"]["Enums"]["request_status"] | null
           updated_at: string | null
+          valid_id_file_url: string | null
           zone_clearance_file_url: string | null
           zone_clearance_id: string | null
           zone_id: string | null
@@ -61,6 +62,7 @@ export type Database = {
           request_date?: string | null
           status?: Database["public"]["Enums"]["request_status"] | null
           updated_at?: string | null
+          valid_id_file_url?: string | null
           zone_clearance_file_url?: string | null
           zone_clearance_id?: string | null
           zone_id?: string | null
@@ -86,6 +88,7 @@ export type Database = {
           request_date?: string | null
           status?: Database["public"]["Enums"]["request_status"] | null
           updated_at?: string | null
+          valid_id_file_url?: string | null
           zone_clearance_file_url?: string | null
           zone_clearance_id?: string | null
           zone_id?: string | null

@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { ArrowLeft, Loader2, AlertCircle } from "lucide-react";
+import { ArrowLeft, Loader2, AlertCircle, Upload } from "lucide-react";
 import { Link } from "react-router-dom";
 import Header from "@/components/Header";
 
@@ -16,10 +16,14 @@ const Indigency = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const [zones, setZones] = useState<any[]>([]);
   const [hasZoneClearance, setHasZoneClearance] = useState<string>("");
-  const [email, setEmail] = useState("");
+  const [verifyMethod, setVerifyMethod] = useState<"email" | "phone" | "">("");
+  const [verifyValue, setVerifyValue] = useState("");
   const [zoneClearanceVerified, setZoneClearanceVerified] = useState(false);
+  const [zoneClearanceFile, setZoneClearanceFile] = useState<File | null>(null);
+  const [step, setStep] = useState<"initial" | "verify-method" | "verify-input" | "upload-clearance" | "form">("initial");
 
   useEffect(() => {
     const fetchZones = async () => {
@@ -29,55 +33,95 @@ const Indigency = () => {
     fetchZones();
   }, []);
 
+  const handleZoneClearanceFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setZoneClearanceFile(e.target.files[0]);
+    }
+  };
+
   const checkZoneClearance = async () => {
-    if (!email) {
+    if (!verifyValue) {
       toast({
-        title: "Email Required",
-        description: "Please enter your email to verify zone clearance.",
+        title: verifyMethod === "email" ? "Email Required" : "Phone Required",
+        description: `Please enter your ${verifyMethod} to verify zone clearance.`,
         variant: "destructive",
       });
       return;
     }
 
-    setLoading(true);
-    const { data, error } = await supabase
+    setVerifying(true);
+    
+    const query = supabase
       .from("document_requests")
       .select("*")
-      .eq("email", email)
       .eq("document_type", "zone_clearance")
-      .eq("status", "approved")
-      .single();
+      .eq("status", "approved");
 
-    setLoading(false);
+    const { data, error } = verifyMethod === "email" 
+      ? await query.eq("email", verifyValue).maybeSingle()
+      : await query.eq("contact", verifyValue).maybeSingle();
+
+    setVerifying(false);
 
     if (data) {
       setZoneClearanceVerified(true);
       toast({
         title: "Verified!",
-        description: "Zone clearance found. You may proceed.",
+        description: "Zone clearance found. Please upload a picture of your zone clearance.",
       });
+      setStep("upload-clearance");
     } else {
       toast({
-        title: "No Zone Clearance",
-        description: "You need to request a zone clearance first.",
+        title: "No Zone Clearance Found",
+        description: `No approved zone clearance found with this ${verifyMethod}. Please request a zone clearance first.`,
         variant: "destructive",
       });
     }
   };
 
+  const handleClearanceUpload = () => {
+    if (!zoneClearanceFile) {
+      toast({
+        title: "File Required",
+        description: "Please upload a picture of your zone clearance.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setStep("form");
+  };
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     
-    if (hasZoneClearance === "yes" && !zoneClearanceVerified) {
+    if (!zoneClearanceVerified || !zoneClearanceFile) {
       toast({
         title: "Verification Required",
-        description: "Please verify your zone clearance first.",
+        description: "Please verify your zone clearance and upload the document first.",
         variant: "destructive",
       });
       return;
     }
 
     setLoading(true);
+
+    // Upload the zone clearance file
+    const fileExt = zoneClearanceFile.name.split('.').pop();
+    const fileName = `indigency-clearances/${Date.now()}.${fileExt}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from('zone-clearances')
+      .upload(fileName, zoneClearanceFile);
+
+    if (uploadError) {
+      toast({
+        title: "Error",
+        description: "Failed to upload zone clearance file. Please try again.",
+        variant: "destructive",
+      });
+      setLoading(false);
+      return;
+    }
 
     const formData = new FormData(e.currentTarget);
     const data = {
@@ -93,7 +137,8 @@ const Indigency = () => {
       marital_status: formData.get("marital_status") as "single" | "married" | "widowed" | "separated",
       document_type: "indigency" as const,
       purpose: formData.get("purpose") as string,
-      has_zone_clearance: hasZoneClearance === "yes",
+      has_zone_clearance: true,
+      zone_clearance_file_url: fileName,
     };
 
     const { error } = await supabase.from("document_requests").insert([data]);
@@ -109,13 +154,14 @@ const Indigency = () => {
     } else {
       toast({
         title: "Success!",
-        description: "Your indigency certificate request has been submitted.",
+        description: "Your indigency certificate request has been submitted. You will receive a reference number once approved.",
       });
       navigate("/");
     }
   };
 
-  if (!hasZoneClearance) {
+  // Step 1: Initial question
+  if (step === "initial") {
     return (
       <div className="min-h-screen bg-background">
         <Header />
@@ -148,7 +194,10 @@ const Indigency = () => {
                   <Button
                     variant="outline"
                     className="flex-1"
-                    onClick={() => setHasZoneClearance("yes")}
+                    onClick={() => {
+                      setHasZoneClearance("yes");
+                      setStep("verify-method");
+                    }}
                   >
                     Yes, I have one
                   </Button>
@@ -168,7 +217,8 @@ const Indigency = () => {
     );
   }
 
-  if (hasZoneClearance === "yes" && !zoneClearanceVerified) {
+  // Step 2: Choose verification method (email or phone)
+  if (step === "verify-method") {
     return (
       <div className="min-h-screen bg-background">
         <Header />
@@ -184,23 +234,86 @@ const Indigency = () => {
             <CardHeader>
               <CardTitle className="text-3xl">Verify Zone Clearance</CardTitle>
               <CardDescription>
-                Enter your email to verify your approved zone clearance
+                How would you like to verify your zone clearance?
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="space-y-4">
+                <Label>Choose verification method:</Label>
+                <div className="flex gap-4">
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => {
+                      setVerifyMethod("email");
+                      setStep("verify-input");
+                    }}
+                  >
+                    Verify by Email
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => {
+                      setVerifyMethod("phone");
+                      setStep("verify-input");
+                    }}
+                  >
+                    Verify by Phone
+                  </Button>
+                </div>
+              </div>
+
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => setStep("initial")}
+              >
+                Go Back
+              </Button>
+            </CardContent>
+          </Card>
+        </main>
+      </div>
+    );
+  }
+
+  // Step 3: Enter email or phone for verification
+  if (step === "verify-input") {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header />
+        <main className="container mx-auto px-4 py-12">
+          <Button variant="ghost" asChild className="mb-6">
+            <Link to="/">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to Home
+            </Link>
+          </Button>
+
+          <Card className="max-w-2xl mx-auto">
+            <CardHeader>
+              <CardTitle className="text-3xl">Verify Zone Clearance</CardTitle>
+              <CardDescription>
+                Enter your {verifyMethod === "email" ? "email address" : "phone number"} to verify your approved zone clearance
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="space-y-2">
-                <Label htmlFor="verify_email">Email Address *</Label>
+                <Label htmlFor="verify_input">
+                  {verifyMethod === "email" ? "Email Address" : "Phone Number"} *
+                </Label>
                 <Input
-                  id="verify_email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="Enter the email used for zone clearance"
+                  id="verify_input"
+                  type={verifyMethod === "email" ? "email" : "tel"}
+                  value={verifyValue}
+                  onChange={(e) => setVerifyValue(e.target.value)}
+                  placeholder={verifyMethod === "email" ? "Enter your email" : "Enter your phone number"}
                 />
               </div>
 
-              <Button onClick={checkZoneClearance} className="w-full" size="lg" disabled={loading}>
-                {loading ? (
+              <Button onClick={checkZoneClearance} className="w-full" size="lg" disabled={verifying}>
+                {verifying ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Verifying...
@@ -213,7 +326,7 @@ const Indigency = () => {
               <Button
                 variant="outline"
                 className="w-full"
-                onClick={() => setHasZoneClearance("")}
+                onClick={() => setStep("verify-method")}
               >
                 Go Back
               </Button>
@@ -224,6 +337,71 @@ const Indigency = () => {
     );
   }
 
+  // Step 4: Upload zone clearance picture
+  if (step === "upload-clearance") {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header />
+        <main className="container mx-auto px-4 py-12">
+          <Button variant="ghost" asChild className="mb-6">
+            <Link to="/">
+              <ArrowLeft className="mr-2 h-4 w-4" />
+              Back to Home
+            </Link>
+          </Button>
+
+          <Card className="max-w-2xl mx-auto">
+            <CardHeader>
+              <CardTitle className="text-3xl">Upload Zone Clearance</CardTitle>
+              <CardDescription>
+                Please upload a picture of your zone clearance document
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <Alert className="bg-green-50 border-green-200">
+                <AlertCircle className="h-4 w-4 text-green-600" />
+                <AlertDescription className="text-green-700">
+                  Zone clearance verified successfully!
+                </AlertDescription>
+              </Alert>
+
+              <div className="space-y-2">
+                <Label htmlFor="zone_clearance_file">Upload Zone Clearance Picture *</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="zone_clearance_file"
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    onChange={handleZoneClearanceFileChange}
+                    required
+                    className="cursor-pointer"
+                  />
+                  <Upload className="h-5 w-5 text-muted-foreground" />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Accepted formats: PDF, JPG, PNG. Take a clear photo of your zone clearance.
+                </p>
+              </div>
+
+              <Button onClick={handleClearanceUpload} className="w-full" size="lg">
+                Continue to Form
+              </Button>
+
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => setStep("verify-input")}
+              >
+                Go Back
+              </Button>
+            </CardContent>
+          </Card>
+        </main>
+      </div>
+    );
+  }
+
+  // Step 5: Main form
   return (
     <div className="min-h-screen bg-background">
       <Header />
@@ -243,6 +421,13 @@ const Indigency = () => {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            <Alert className="mb-6 bg-green-50 border-green-200">
+              <AlertCircle className="h-4 w-4 text-green-600" />
+              <AlertDescription className="text-green-700">
+                Zone clearance verified and uploaded successfully!
+              </AlertDescription>
+            </Alert>
+
             <form onSubmit={handleSubmit} className="space-y-6">
               <div className="grid md:grid-cols-3 gap-4">
                 <div className="space-y-2">
@@ -294,11 +479,22 @@ const Indigency = () => {
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="contact">Contact Number *</Label>
-                  <Input id="contact" name="contact" type="tel" required />
+                  <Input 
+                    id="contact" 
+                    name="contact" 
+                    type="tel" 
+                    required 
+                    defaultValue={verifyMethod === "phone" ? verifyValue : ""}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="email">Email</Label>
-                  <Input id="email" name="email" type="email" defaultValue={email} />
+                  <Input 
+                    id="email" 
+                    name="email" 
+                    type="email" 
+                    defaultValue={verifyMethod === "email" ? verifyValue : ""}
+                  />
                 </div>
               </div>
 
