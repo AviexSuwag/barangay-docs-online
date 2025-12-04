@@ -13,9 +13,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import { FileText, CheckCircle, XCircle, Clock, LogOut, Search } from "lucide-react";
+import { FileText, CheckCircle, XCircle, Clock, LogOut, Search, Eye, Download } from "lucide-react";
 import Header from "@/components/Header";
 
 const AdminDashboard = () => {
@@ -25,6 +32,8 @@ const AdminDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
+  const [selectedRequest, setSelectedRequest] = useState<any>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
 
   useEffect(() => {
     checkAuth();
@@ -120,12 +129,23 @@ const AdminDashboard = () => {
     }
   };
 
+  const viewRequestDetails = (request: any) => {
+    setSelectedRequest(request);
+    setDetailOpen(true);
+  };
+
+  const getFileUrl = async (filePath: string, bucket: string = "zone-clearances") => {
+    const { data } = await supabase.storage.from(bucket).getPublicUrl(filePath);
+    return data.publicUrl;
+  };
+
   const filteredRequests = requests.filter((req) => {
     const matchesFilter = filter === "all" || req.status === filter;
     const matchesSearch = 
       req.first_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       req.last_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      req.email?.toLowerCase().includes(searchTerm.toLowerCase());
+      req.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      req.reference_number?.toLowerCase().includes(searchTerm.toLowerCase());
     return matchesFilter && matchesSearch;
   });
 
@@ -280,26 +300,35 @@ const AdminDashboard = () => {
                           {new Date(request.request_date).toLocaleDateString()}
                         </TableCell>
                         <TableCell>
-                          {request.status === "pending" && (
-                            <div className="flex gap-2">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="text-success border-success hover:bg-success hover:text-white"
-                                onClick={() => handleStatusUpdate(request.id, "approved")}
-                              >
-                                <CheckCircle className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="text-destructive border-destructive hover:bg-destructive hover:text-white"
-                                onClick={() => handleStatusUpdate(request.id, "rejected")}
-                              >
-                                <XCircle className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          )}
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => viewRequestDetails(request)}
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            {request.status === "pending" && (
+                              <>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-success border-success hover:bg-success hover:text-white"
+                                  onClick={() => handleStatusUpdate(request.id, "approved")}
+                                >
+                                  <CheckCircle className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-destructive border-destructive hover:bg-destructive hover:text-white"
+                                  onClick={() => handleStatusUpdate(request.id, "rejected")}
+                                >
+                                  <XCircle className="h-4 w-4" />
+                                </Button>
+                              </>
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))
@@ -309,6 +338,140 @@ const AdminDashboard = () => {
             </div>
           </CardContent>
         </Card>
+
+        {/* Request Detail Dialog */}
+        <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Request Details</DialogTitle>
+              <DialogDescription>
+                Full information for this document request
+              </DialogDescription>
+            </DialogHeader>
+            {selectedRequest && (
+              <div className="grid gap-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <h4 className="text-sm font-medium text-muted-foreground">Reference Number</h4>
+                    <p className="text-sm font-semibold">{selectedRequest.reference_number || "Not yet assigned"}</p>
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-medium text-muted-foreground">Status</h4>
+                    <div>{getStatusBadge(selectedRequest.status)}</div>
+                  </div>
+                </div>
+
+                <div className="border-t pt-4">
+                  <h3 className="font-semibold mb-3">Personal Information</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <h4 className="text-sm font-medium text-muted-foreground">Full Name</h4>
+                      <p className="text-sm">{selectedRequest.first_name} {selectedRequest.middle_name || ""} {selectedRequest.last_name}</p>
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-medium text-muted-foreground">Age</h4>
+                      <p className="text-sm">{selectedRequest.age}</p>
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-medium text-muted-foreground">Birth Date</h4>
+                      <p className="text-sm">{new Date(selectedRequest.birth_date).toLocaleDateString()}</p>
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-medium text-muted-foreground">Marital Status</h4>
+                      <p className="text-sm capitalize">{selectedRequest.marital_status}</p>
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-medium text-muted-foreground">Contact</h4>
+                      <p className="text-sm">{selectedRequest.contact}</p>
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-medium text-muted-foreground">Email</h4>
+                      <p className="text-sm">{selectedRequest.email || "N/A"}</p>
+                    </div>
+                    <div className="col-span-2">
+                      <h4 className="text-sm font-medium text-muted-foreground">Address</h4>
+                      <p className="text-sm">{selectedRequest.address}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t pt-4">
+                  <h3 className="font-semibold mb-3">Request Information</h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <h4 className="text-sm font-medium text-muted-foreground">Document Type</h4>
+                      <p className="text-sm capitalize">{selectedRequest.document_type?.replace("_", " ")}</p>
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-medium text-muted-foreground">Zone</h4>
+                      <p className="text-sm">{selectedRequest.zones?.zone_name || "N/A"}</p>
+                    </div>
+                    <div className="col-span-2">
+                      <h4 className="text-sm font-medium text-muted-foreground">Purpose</h4>
+                      <p className="text-sm">{selectedRequest.purpose}</p>
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-medium text-muted-foreground">Request Date</h4>
+                      <p className="text-sm">{new Date(selectedRequest.request_date).toLocaleString()}</p>
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-medium text-muted-foreground">Has Zone Clearance</h4>
+                      <p className="text-sm">{selectedRequest.has_zone_clearance ? "Yes" : "No"}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {selectedRequest.status === "rejected" && selectedRequest.rejection_reason && (
+                  <div className="border-t pt-4">
+                    <h3 className="font-semibold mb-3 text-destructive">Rejection Details</h3>
+                    <div>
+                      <h4 className="text-sm font-medium text-muted-foreground">Reason</h4>
+                      <p className="text-sm">{selectedRequest.rejection_reason}</p>
+                    </div>
+                  </div>
+                )}
+
+                {(selectedRequest.valid_id_file_url || selectedRequest.zone_clearance_file_url) && (
+                  <div className="border-t pt-4">
+                    <h3 className="font-semibold mb-3">Uploaded Documents</h3>
+                    <div className="flex gap-2">
+                      {selectedRequest.valid_id_file_url && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => window.open(selectedRequest.valid_id_file_url, "_blank")}
+                        >
+                          <Download className="h-4 w-4 mr-2" />
+                          View Valid ID
+                        </Button>
+                      )}
+                      {selectedRequest.zone_clearance_file_url && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => window.open(selectedRequest.zone_clearance_file_url, "_blank")}
+                        >
+                          <Download className="h-4 w-4 mr-2" />
+                          View Zone Clearance
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {selectedRequest.processed_at && (
+                  <div className="border-t pt-4">
+                    <h3 className="font-semibold mb-3">Processing Information</h3>
+                    <div>
+                      <h4 className="text-sm font-medium text-muted-foreground">Processed At</h4>
+                      <p className="text-sm">{new Date(selectedRequest.processed_at).toLocaleString()}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </main>
     </div>
   );
