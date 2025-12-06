@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { getZones, createDocumentRequest, saveFile, getApprovedZoneClearance } from "@/lib/offlineDb";
 import { ArrowLeft, Loader2, Upload, AlertCircle } from "lucide-react";
 import { Link } from "react-router-dom";
 import Header from "@/components/Header";
@@ -24,8 +24,8 @@ const Clearance = () => {
 
   useEffect(() => {
     const fetchZones = async () => {
-      const { data } = await supabase.from("zones").select("*").order("zone_number");
-      if (data) setZones(data);
+      const data = await getZones();
+      setZones(data);
     };
     fetchZones();
   }, []);
@@ -51,24 +51,11 @@ const Clearance = () => {
 
     setVerifying(true);
 
-    // Search for approved zone clearance by email or phone
-    let query = supabase
-      .from("document_requests")
-      .select("*")
-      .eq("document_type", "zone_clearance")
-      .eq("status", "approved");
-
-    if (email) {
-      query = query.eq("email", email);
-    } else if (phone) {
-      query = query.eq("contact", phone);
-    }
-
-    const { data, error } = await query;
+    const data = await getApprovedZoneClearance(email || undefined, phone || undefined);
 
     setVerifying(false);
 
-    if (error || !data || data.length === 0) {
+    if (!data) {
       toast({
         title: "Not Found",
         description: "No approved Zone Clearance found with the provided information. Please request a Zone Clearance first.",
@@ -113,27 +100,9 @@ const Clearance = () => {
     
     let fileUrl = null;
     
-    // If they uploaded a file, upload it to storage
+    // If they uploaded a file, save it locally
     if (uploadedFile) {
-      const fileExt = uploadedFile.name.split('.').pop();
-      const fileName = `${Date.now()}.${fileExt}`;
-      const filePath = `${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('zone-clearances')
-        .upload(filePath, uploadedFile);
-
-      if (uploadError) {
-        toast({
-          title: "Error",
-          description: "Failed to upload file. Please try again.",
-          variant: "destructive",
-        });
-        setLoading(false);
-        return;
-      }
-
-      fileUrl = filePath;
+      fileUrl = await saveFile(uploadedFile);
     }
 
     const data = {
@@ -150,26 +119,25 @@ const Clearance = () => {
       document_type: "clearance" as const,
       purpose: formData.get("purpose") as string,
       has_zone_clearance: true,
-      zone_clearance_file_url: fileUrl,
+      zone_clearance_file_url: fileUrl || undefined,
     };
 
-    const { error } = await supabase.from("document_requests").insert([data]);
-
-    setLoading(false);
-
-    if (error) {
-      toast({
-        title: "Error",
-        description: "Failed to submit request. Please try again.",
-        variant: "destructive",
-      });
-    } else {
+    try {
+      await createDocumentRequest(data);
       toast({
         title: "Success!",
         description: "Your barangay clearance request has been submitted.",
       });
       navigate("/");
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to submit request. Please try again.",
+        variant: "destructive",
+      });
     }
+
+    setLoading(false);
   };
 
   return (
