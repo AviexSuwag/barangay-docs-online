@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { searchDocumentRequests, getZoneById } from "@/lib/offlineDb";
 import { ArrowLeft, Loader2, Search, CheckCircle, XCircle, Clock } from "lucide-react";
 import { Link } from "react-router-dom";
 import Header from "@/components/Header";
@@ -30,25 +30,19 @@ const TrackRequest = () => {
     
     setLoading(true);
 
-    // Search by email OR phone number
-    const { data, error } = await supabase
-      .from("document_requests")
-      .select("*, zones(zone_name)")
-      .or(`email.eq.${searchValue},contact.eq.${searchValue}`)
-      .order("request_date", { ascending: false });
+    const data = await searchDocumentRequests(searchValue);
+
+    // Fetch zone names for each request
+    const requestsWithZones = await Promise.all(
+      data.map(async (req) => {
+        const zone = req.zone_id ? await getZoneById(req.zone_id) : null;
+        return { ...req, zones: zone };
+      })
+    );
 
     setLoading(false);
 
-    if (error) {
-      toast({
-        title: "Error",
-        description: "Failed to fetch requests. Please try again.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (!data || data.length === 0) {
+    if (requestsWithZones.length === 0) {
       toast({
         title: "No Requests Found",
         description: "No requests found with this email or phone number.",
@@ -57,7 +51,7 @@ const TrackRequest = () => {
       return;
     }
 
-    setRequests(data);
+    setRequests(requestsWithZones);
   };
 
   const getStatusIcon = (status: string) => {

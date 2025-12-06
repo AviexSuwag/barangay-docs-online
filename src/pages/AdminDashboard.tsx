@@ -21,7 +21,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { 
+  getDocumentRequests, 
+  updateDocumentRequest, 
+  getAdminSession, 
+  adminLogout, 
+  getZoneById,
+  getFile 
+} from "@/lib/offlineDb";
 import { FileText, CheckCircle, XCircle, Clock, LogOut, Search, Eye, Download } from "lucide-react";
 import Header from "@/components/Header";
 
@@ -40,8 +47,8 @@ const AdminDashboard = () => {
     fetchRequests();
   }, []);
 
-  const checkAuth = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
+  const checkAuth = () => {
+    const session = getAdminSession();
     if (!session) {
       navigate("/admin");
     }
@@ -49,20 +56,17 @@ const AdminDashboard = () => {
 
   const fetchRequests = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from("document_requests")
-      .select("*, zones(zone_name)")
-      .order("request_date", { ascending: false });
-
-    if (error) {
-      toast({
-        title: "Error",
-        description: "Failed to load requests.",
-        variant: "destructive",
-      });
-    } else {
-      setRequests(data || []);
-    }
+    const data = await getDocumentRequests();
+    
+    // Fetch zone names for each request
+    const requestsWithZones = await Promise.all(
+      data.map(async (req) => {
+        const zone = req.zone_id ? await getZoneById(req.zone_id) : null;
+        return { ...req, zones: zone };
+      })
+    );
+    
+    setRequests(requestsWithZones);
     setLoading(false);
   };
 
@@ -73,8 +77,7 @@ const AdminDashboard = () => {
       return;
     }
 
-    // Get current user session
-    const { data: { session } } = await supabase.auth.getSession();
+    const session = getAdminSession();
     
     if (!session) {
       toast({
@@ -85,36 +88,23 @@ const AdminDashboard = () => {
       return;
     }
 
-    const updateData: any = { 
+    await updateDocumentRequest(id, {
       status,
-      rejection_reason: reason,
-      processed_by: session.user.id,
+      rejection_reason: reason || undefined,
+      processed_by: session.id,
       processed_at: new Date().toISOString(),
-    };
+    });
 
-    const { error } = await supabase
-      .from("document_requests")
-      .update(updateData)
-      .eq("id", id);
-
-    if (error) {
-      console.error("Update error:", error);
-      toast({
-        title: "Error",
-        description: `Failed to update request status: ${error.message}`,
-        variant: "destructive",
-      });
-    } else {
-      toast({
-        title: "Success",
-        description: `Request ${status} successfully.${status === 'approved' ? ' A reference number has been generated.' : ''}`,
-      });
-      fetchRequests();
-    }
+    toast({
+      title: "Success",
+      description: `Request ${status} successfully.${status === 'approved' ? ' A reference number has been generated.' : ''}`,
+    });
+    
+    fetchRequests();
   };
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
+  const handleLogout = () => {
+    adminLogout();
     navigate("/");
   };
 
@@ -134,9 +124,14 @@ const AdminDashboard = () => {
     setDetailOpen(true);
   };
 
-  const getFileUrl = async (filePath: string, bucket: string = "zone-clearances") => {
-    const { data } = await supabase.storage.from(bucket).getPublicUrl(filePath);
-    return data.publicUrl;
+  const handleDownloadFile = async (fileId: string, fileName: string) => {
+    const file = await getFile(fileId);
+    if (file) {
+      const link = document.createElement('a');
+      link.href = file.data;
+      link.download = fileName || file.name;
+      link.click();
+    }
   };
 
   const filteredRequests = requests.filter((req) => {
@@ -164,7 +159,7 @@ const AdminDashboard = () => {
         <div className="flex justify-between items-center mb-8">
           <div>
             <h2 className="text-3xl font-bold">Admin Dashboard</h2>
-            <p className="text-muted-foreground">Manage document requests</p>
+            <p className="text-muted-foreground">Manage document requests (Offline Mode)</p>
           </div>
           <Button variant="outline" onClick={handleLogout}>
             <LogOut className="mr-2 h-4 w-4" />
@@ -431,41 +426,59 @@ const AdminDashboard = () => {
                   </div>
                 )}
 
-                {(selectedRequest.valid_id_file_url || selectedRequest.zone_clearance_file_url) && (
-                  <div className="border-t pt-4">
-                    <h3 className="font-semibold mb-3">Uploaded Documents</h3>
-                    <div className="flex gap-2">
-                      {selectedRequest.valid_id_file_url && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => window.open(selectedRequest.valid_id_file_url, "_blank")}
-                        >
-                          <Download className="h-4 w-4 mr-2" />
-                          View Valid ID
-                        </Button>
-                      )}
-                      {selectedRequest.zone_clearance_file_url && (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => window.open(selectedRequest.zone_clearance_file_url, "_blank")}
-                        >
-                          <Download className="h-4 w-4 mr-2" />
-                          View Zone Clearance
-                        </Button>
-                      )}
-                    </div>
+                {/* File Downloads */}
+                <div className="border-t pt-4">
+                  <h3 className="font-semibold mb-3">Uploaded Files</h3>
+                  <div className="flex gap-2 flex-wrap">
+                    {selectedRequest.valid_id_file_url && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDownloadFile(selectedRequest.valid_id_file_url, "valid-id")}
+                      >
+                        <Download className="mr-2 h-4 w-4" />
+                        Valid ID
+                      </Button>
+                    )}
+                    {selectedRequest.zone_clearance_file_url && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDownloadFile(selectedRequest.zone_clearance_file_url, "zone-clearance")}
+                      >
+                        <Download className="mr-2 h-4 w-4" />
+                        Zone Clearance
+                      </Button>
+                    )}
+                    {!selectedRequest.valid_id_file_url && !selectedRequest.zone_clearance_file_url && (
+                      <p className="text-sm text-muted-foreground">No files uploaded</p>
+                    )}
                   </div>
-                )}
+                </div>
 
-                {selectedRequest.processed_at && (
-                  <div className="border-t pt-4">
-                    <h3 className="font-semibold mb-3">Processing Information</h3>
-                    <div>
-                      <h4 className="text-sm font-medium text-muted-foreground">Processed At</h4>
-                      <p className="text-sm">{new Date(selectedRequest.processed_at).toLocaleString()}</p>
-                    </div>
+                {selectedRequest.status === "pending" && (
+                  <div className="border-t pt-4 flex gap-2">
+                    <Button
+                      className="flex-1"
+                      onClick={() => {
+                        handleStatusUpdate(selectedRequest.id, "approved");
+                        setDetailOpen(false);
+                      }}
+                    >
+                      <CheckCircle className="mr-2 h-4 w-4" />
+                      Approve
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      className="flex-1"
+                      onClick={() => {
+                        handleStatusUpdate(selectedRequest.id, "rejected");
+                        setDetailOpen(false);
+                      }}
+                    >
+                      <XCircle className="mr-2 h-4 w-4" />
+                      Reject
+                    </Button>
                   </div>
                 )}
               </div>

@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { getZones, createDocumentRequest, saveFile } from "@/lib/offlineDb";
 import { ArrowLeft, Loader2, Upload } from "lucide-react";
 import { Link } from "react-router-dom";
 import Header from "@/components/Header";
@@ -22,8 +22,8 @@ const ZoneClearance = () => {
 
   useEffect(() => {
     const fetchZones = async () => {
-      const { data } = await supabase.from("zones").select("*").order("zone_number");
-      if (data) setZones(data);
+      const data = await getZones();
+      setZones(data);
     };
     fetchZones();
   }, []);
@@ -40,22 +40,6 @@ const ZoneClearance = () => {
     }
   };
 
-  const uploadFile = async (file: File, folder: string): Promise<string | null> => {
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${folder}/${Date.now()}.${fileExt}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from('zone-clearances')
-      .upload(fileName, file);
-
-    if (uploadError) {
-      console.error('Upload error:', uploadError);
-      return null;
-    }
-
-    return fileName;
-  };
-
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setLoading(true);
@@ -65,18 +49,9 @@ const ZoneClearance = () => {
     let zoneClearanceFileUrl = null;
     let validIdFileUrl = null;
     
-    // If they have existing clearance, upload the clearance file
+    // If they have existing clearance, save the clearance file
     if (hasExistingClearance === "yes" && existingClearanceFile) {
-      zoneClearanceFileUrl = await uploadFile(existingClearanceFile, 'existing-clearances');
-      if (!zoneClearanceFileUrl) {
-        toast({
-          title: "Error",
-          description: "Failed to upload zone clearance file. Please try again.",
-          variant: "destructive",
-        });
-        setLoading(false);
-        return;
-      }
+      zoneClearanceFileUrl = await saveFile(existingClearanceFile);
     }
 
     // If they don't have existing clearance, they must upload a valid ID
@@ -91,16 +66,7 @@ const ZoneClearance = () => {
         return;
       }
       
-      validIdFileUrl = await uploadFile(validIdFile, 'valid-ids');
-      if (!validIdFileUrl) {
-        toast({
-          title: "Error",
-          description: "Failed to upload valid ID. Please try again.",
-          variant: "destructive",
-        });
-        setLoading(false);
-        return;
-      }
+      validIdFileUrl = await saveFile(validIdFile);
     }
 
     const data = {
@@ -117,27 +83,26 @@ const ZoneClearance = () => {
       document_type: "zone_clearance" as const,
       purpose: formData.get("purpose") as string,
       has_zone_clearance: hasExistingClearance === "yes",
-      zone_clearance_file_url: zoneClearanceFileUrl,
-      valid_id_file_url: validIdFileUrl,
+      zone_clearance_file_url: zoneClearanceFileUrl || undefined,
+      valid_id_file_url: validIdFileUrl || undefined,
     };
 
-    const { error } = await supabase.from("document_requests").insert([data]);
-
-    setLoading(false);
-
-    if (error) {
-      toast({
-        title: "Error",
-        description: "Failed to submit request. Please try again.",
-        variant: "destructive",
-      });
-    } else {
+    try {
+      await createDocumentRequest(data);
       toast({
         title: "Success!",
         description: "Your zone clearance request has been submitted. You will receive a reference number once approved.",
       });
       navigate("/");
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to submit request. Please try again.",
+        variant: "destructive",
+      });
     }
+
+    setLoading(false);
   };
 
   return (

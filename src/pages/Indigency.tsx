@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { getZones, createDocumentRequest, saveFile, getApprovedZoneClearance } from "@/lib/offlineDb";
 import { ArrowLeft, Loader2, AlertCircle, Upload } from "lucide-react";
 import { Link } from "react-router-dom";
 import Header from "@/components/Header";
@@ -27,8 +27,8 @@ const Indigency = () => {
 
   useEffect(() => {
     const fetchZones = async () => {
-      const { data } = await supabase.from("zones").select("*").order("zone_number");
-      if (data) setZones(data);
+      const data = await getZones();
+      setZones(data);
     };
     fetchZones();
   }, []);
@@ -51,15 +51,10 @@ const Indigency = () => {
 
     setVerifying(true);
     
-    const query = supabase
-      .from("document_requests")
-      .select("*")
-      .eq("document_type", "zone_clearance")
-      .eq("status", "approved");
-
-    const { data, error } = verifyMethod === "email" 
-      ? await query.eq("email", verifyValue).maybeSingle()
-      : await query.eq("contact", verifyValue).maybeSingle();
+    const data = await getApprovedZoneClearance(
+      verifyMethod === "email" ? verifyValue : undefined,
+      verifyMethod === "phone" ? verifyValue : undefined
+    );
 
     setVerifying(false);
 
@@ -105,23 +100,8 @@ const Indigency = () => {
 
     setLoading(true);
 
-    // Upload the zone clearance file
-    const fileExt = zoneClearanceFile.name.split('.').pop();
-    const fileName = `indigency-clearances/${Date.now()}.${fileExt}`;
-
-    const { error: uploadError } = await supabase.storage
-      .from('zone-clearances')
-      .upload(fileName, zoneClearanceFile);
-
-    if (uploadError) {
-      toast({
-        title: "Error",
-        description: "Failed to upload zone clearance file. Please try again.",
-        variant: "destructive",
-      });
-      setLoading(false);
-      return;
-    }
+    // Save the zone clearance file locally
+    const fileName = await saveFile(zoneClearanceFile);
 
     const formData = new FormData(e.currentTarget);
     const data = {
@@ -141,23 +121,22 @@ const Indigency = () => {
       zone_clearance_file_url: fileName,
     };
 
-    const { error } = await supabase.from("document_requests").insert([data]);
-
-    setLoading(false);
-
-    if (error) {
-      toast({
-        title: "Error",
-        description: "Failed to submit request. Please try again.",
-        variant: "destructive",
-      });
-    } else {
+    try {
+      await createDocumentRequest(data);
       toast({
         title: "Success!",
         description: "Your indigency certificate request has been submitted. You will receive a reference number once approved.",
       });
       navigate("/");
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to submit request. Please try again.",
+        variant: "destructive",
+      });
     }
+
+    setLoading(false);
   };
 
   // Step 1: Initial question
@@ -492,7 +471,7 @@ const Indigency = () => {
                   <Input 
                     id="email" 
                     name="email" 
-                    type="email" 
+                    type="email"
                     defaultValue={verifyMethod === "email" ? verifyValue : ""}
                   />
                 </div>
@@ -515,7 +494,7 @@ const Indigency = () => {
 
               <div className="space-y-2">
                 <Label htmlFor="purpose">Purpose *</Label>
-                <Input id="purpose" name="purpose" placeholder="e.g., Medical assistance, School scholarship" required />
+                <Input id="purpose" name="purpose" placeholder="e.g., Financial assistance, Medical assistance" required />
               </div>
 
               <Button type="submit" className="w-full" size="lg" disabled={loading}>

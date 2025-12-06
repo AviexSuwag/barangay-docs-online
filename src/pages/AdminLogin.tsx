@@ -5,11 +5,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { adminLogin, adminSignup } from "@/lib/offlineDb";
 import { ArrowLeft, Loader2, Shield } from "lucide-react";
 import { Link } from "react-router-dom";
 import Header from "@/components/Header";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 const AdminLogin = () => {
   const navigate = useNavigate();
@@ -24,17 +25,14 @@ const AdminLogin = () => {
     const email = formData.get("email") as string;
     const password = formData.get("password") as string;
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    const user = await adminLogin(email, password);
 
     setLoading(false);
 
-    if (error) {
+    if (!user) {
       toast({
         title: "Login Failed",
-        description: error.message,
+        description: "Invalid email or password.",
         variant: "destructive",
       });
     } else {
@@ -55,31 +53,21 @@ const AdminLogin = () => {
     const password = formData.get("signup_password") as string;
     const fullName = formData.get("full_name") as string;
 
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          full_name: fullName,
-        },
-        emailRedirectTo: `${window.location.origin}/admin/dashboard`,
-      },
-    });
-
-    setLoading(false);
-
-    if (error) {
-      toast({
-        title: "Signup Failed",
-        description: error.message,
-        variant: "destructive",
-      });
-    } else {
+    try {
+      await adminSignup(email, password, fullName);
       toast({
         title: "Success!",
         description: "Account created. You can now log in.",
       });
+    } catch (error: any) {
+      toast({
+        title: "Signup Failed",
+        description: error.message || "Failed to create account.",
+        variant: "destructive",
+      });
     }
+
+    setLoading(false);
   };
 
   return (
@@ -102,6 +90,12 @@ const AdminLogin = () => {
             <CardDescription>Access the administrative dashboard</CardDescription>
           </CardHeader>
           <CardContent>
+            <Alert className="mb-4">
+              <AlertDescription>
+                <strong>Default Admin:</strong> admin@barangay.gov.ph / admin123
+              </AlertDescription>
+            </Alert>
+
             <Tabs defaultValue="login" className="w-full">
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="login">Login</TabsTrigger>
