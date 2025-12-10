@@ -16,9 +16,10 @@ interface DocumentRequest {
   purpose: string;
   has_zone_clearance: boolean;
   zone_clearance_file_url?: string;
+  zone_clearance_reference?: string; // Reference number of the zone clearance used for verification
   valid_id_file_url?: string;
   status: 'pending' | 'approved' | 'rejected';
-  reference_number?: string;
+  reference_number: string; // Now required - generated immediately on submission
   rejection_reason?: string;
   request_date: string;
   processed_by?: string;
@@ -52,6 +53,7 @@ interface BarangayDB extends DBSchema {
       'by-contact': string; 
       'by-status': string;
       'by-document-type': string;
+      'by-reference-number': string;
     };
   };
   zones: {
@@ -75,25 +77,39 @@ let db: IDBPDatabase<BarangayDB> | null = null;
 export async function getDb(): Promise<IDBPDatabase<BarangayDB>> {
   if (db) return db;
 
-  db = await openDB<BarangayDB>('barangay-bayabas', 1, {
-    upgrade(database) {
-      // Document requests store
-      const requestStore = database.createObjectStore('document_requests', { keyPath: 'id' });
-      requestStore.createIndex('by-email', 'email');
-      requestStore.createIndex('by-contact', 'contact');
-      requestStore.createIndex('by-status', 'status');
-      requestStore.createIndex('by-document-type', 'document_type');
+  db = await openDB<BarangayDB>('barangay-bayabas', 2, {
+    upgrade(database, oldVersion) {
+      // Handle upgrade from version 1
+      if (oldVersion < 1) {
+        // Document requests store
+        const requestStore = database.createObjectStore('document_requests', { keyPath: 'id' });
+        requestStore.createIndex('by-email', 'email');
+        requestStore.createIndex('by-contact', 'contact');
+        requestStore.createIndex('by-status', 'status');
+        requestStore.createIndex('by-document-type', 'document_type');
+        requestStore.createIndex('by-reference-number', 'reference_number');
 
-      // Zones store
-      const zoneStore = database.createObjectStore('zones', { keyPath: 'id' });
-      zoneStore.createIndex('by-zone-number', 'zone_number');
+        // Zones store
+        const zoneStore = database.createObjectStore('zones', { keyPath: 'id' });
+        zoneStore.createIndex('by-zone-number', 'zone_number');
 
-      // Admin users store
-      const adminStore = database.createObjectStore('admin_users', { keyPath: 'id' });
-      adminStore.createIndex('by-email', 'email');
+        // Admin users store
+        const adminStore = database.createObjectStore('admin_users', { keyPath: 'id' });
+        adminStore.createIndex('by-email', 'email');
 
-      // Files store (for uploaded documents)
-      database.createObjectStore('files', { keyPath: 'id' });
+        // Files store (for uploaded documents)
+        database.createObjectStore('files', { keyPath: 'id' });
+      }
+      
+      // Handle upgrade from version 1 to 2 - add reference number index
+      if (oldVersion < 2 && oldVersion >= 1) {
+        const requestStore = database.objectStoreNames.contains('document_requests') 
+          ? (database as any).transaction.objectStore('document_requests')
+          : null;
+        if (requestStore && !requestStore.indexNames.contains('by-reference-number')) {
+          requestStore.createIndex('by-reference-number', 'reference_number');
+        }
+      }
     },
   });
 
@@ -137,24 +153,30 @@ export function generateId(): string {
   return 'req-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
 }
 
-// Generate reference number
-export function generateReferenceNumber(): string {
+// Generate reference number with document type prefix
+export function generateReferenceNumber(documentType: 'zone_clearance' | 'indigency' | 'clearance'): string {
   const date = new Date();
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
   const day = String(date.getDate()).padStart(2, '0');
   const random = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
-  return `BRGY-${year}${month}${day}-${random}`;
+  
+  // Different prefixes for different document types
+  const prefix = documentType === 'zone_clearance' ? 'ZC' : 
+                 documentType === 'clearance' ? 'BC' : 'BI';
+  
+  return `${prefix}-${year}${month}${day}-${random}`;
 }
 
-// Document Requests
-export async function createDocumentRequest(data: Omit<DocumentRequest, 'id' | 'status' | 'request_date'>): Promise<DocumentRequest> {
+// Document Requests - Now generates reference number immediately
+export async function createDocumentRequest(data: Omit<DocumentRequest, 'id' | 'status' | 'request_date' | 'reference_number'>): Promise<DocumentRequest> {
   const database = await getDb();
   const request: DocumentRequest = {
     ...data,
     id: generateId(),
     status: 'pending',
     request_date: new Date().toISOString(),
+    reference_number: generateReferenceNumber(data.document_type), // Generate immediately
   };
   await database.add('document_requests', request);
   return request;
@@ -171,14 +193,28 @@ export async function getDocumentRequestById(id: string): Promise<DocumentReques
   return database.get('document_requests', id);
 }
 
-export async function searchDocumentRequests(searchValue: string): Promise<DocumentRequest[]> {
+// Search by reference number
+export async function searchDocumentRequests(referenceNumber: string): Promise<DocumentRequest[]> {
   const database = await getDb();
   const allRequests = await database.getAll('document_requests');
   return allRequests.filter(
-    req => req.email === searchValue || req.contact === searchValue
+    req => req.reference_number?.toLowerCase() === referenceNumber.toLowerCase()
   ).sort((a, b) => new Date(b.request_date).getTime() - new Date(a.request_date).getTime());
 }
 
+// Verify approved zone clearance by reference number
+export async function getApprovedZoneClearanceByRefNumber(referenceNumber: string): Promise<DocumentRequest | undefined> {
+  const database = await getDb();
+  const allRequests = await database.getAll('document_requests');
+  return allRequests.find(
+    req => 
+      req.document_type === 'zone_clearance' && 
+      req.status === 'approved' &&
+      req.reference_number?.toLowerCase() === referenceNumber.toLowerCase()
+  );
+}
+
+// Keep legacy function for backwards compatibility but deprecated
 export async function getApprovedZoneClearance(email?: string, phone?: string): Promise<DocumentRequest | undefined> {
   const database = await getDb();
   const allRequests = await database.getAll('document_requests');
@@ -198,10 +234,6 @@ export async function updateDocumentRequest(id: string, updates: Partial<Documen
       ...existing, 
       ...updates, 
       updated_at: new Date().toISOString(),
-      // Auto-generate reference number on approval
-      reference_number: updates.status === 'approved' && !existing.reference_number 
-        ? generateReferenceNumber() 
-        : existing.reference_number 
     };
     await database.put('document_requests', updated);
   }

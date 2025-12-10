@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,18 +6,18 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { getZones, createDocumentRequest, saveFile } from "@/lib/offlineDb";
-import { ArrowLeft, Loader2, Upload } from "lucide-react";
+import { ArrowLeft, Loader2, Upload, CheckCircle, Copy } from "lucide-react";
 import { Link } from "react-router-dom";
 import Header from "@/components/Header";
 
 const ZoneClearance = () => {
-  const navigate = useNavigate();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [zones, setZones] = useState<any[]>([]);
   const [hasExistingClearance, setHasExistingClearance] = useState<string>("no");
   const [existingClearanceFile, setExistingClearanceFile] = useState<File | null>(null);
   const [validIdFile, setValidIdFile] = useState<File | null>(null);
+  const [submittedReferenceNumber, setSubmittedReferenceNumber] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchZones = async () => {
@@ -40,6 +39,16 @@ const ZoneClearance = () => {
     }
   };
 
+  const copyReferenceNumber = () => {
+    if (submittedReferenceNumber) {
+      navigator.clipboard.writeText(submittedReferenceNumber);
+      toast({
+        title: "Copied!",
+        description: "Reference number copied to clipboard.",
+      });
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setLoading(true);
@@ -54,12 +63,12 @@ const ZoneClearance = () => {
       zoneClearanceFileUrl = await saveFile(existingClearanceFile);
     }
 
-    // If they don't have existing clearance, they must upload a valid ID
+    // If they don't have existing clearance, they must upload a valid ID (any image accepted for demo)
     if (hasExistingClearance === "no") {
       if (!validIdFile) {
         toast({
-          title: "Valid ID Required",
-          description: "Please upload a valid ID to proceed with your request.",
+          title: "Image Required",
+          description: "Please upload an image to proceed with your request.",
           variant: "destructive",
         });
         setLoading(false);
@@ -88,12 +97,12 @@ const ZoneClearance = () => {
     };
 
     try {
-      await createDocumentRequest(data);
+      const result = await createDocumentRequest(data);
+      setSubmittedReferenceNumber(result.reference_number);
       toast({
         title: "Success!",
-        description: "Your zone clearance request has been submitted. You will receive a reference number once approved.",
+        description: "Your zone clearance request has been submitted.",
       });
-      navigate("/");
     } catch (error) {
       toast({
         title: "Error",
@@ -104,6 +113,57 @@ const ZoneClearance = () => {
 
     setLoading(false);
   };
+
+  // Success screen with reference number
+  if (submittedReferenceNumber) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Header />
+        <main className="container mx-auto px-4 py-12">
+          <Card className="max-w-2xl mx-auto">
+            <CardHeader className="text-center">
+              <div className="flex justify-center mb-4">
+                <CheckCircle className="h-16 w-16 text-success" />
+              </div>
+              <CardTitle className="text-3xl">Request Submitted!</CardTitle>
+              <CardDescription>
+                Your zone clearance request has been successfully submitted
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="p-6 bg-primary/10 border-2 border-primary/20 rounded-lg text-center">
+                <p className="text-sm font-medium mb-2">Your Reference Number:</p>
+                <div className="flex items-center justify-center gap-2">
+                  <p className="text-3xl font-bold text-primary">{submittedReferenceNumber}</p>
+                  <Button variant="ghost" size="icon" onClick={copyReferenceNumber}>
+                    <Copy className="h-5 w-5" />
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-3 text-sm">
+                <p className="font-medium">Important:</p>
+                <ul className="list-disc list-inside space-y-2 text-muted-foreground">
+                  <li>Save this reference number. You will need it to track your request.</li>
+                  <li>Once approved, use this reference number to apply for Barangay Clearance or Barangay Indigency.</li>
+                  <li>Present this reference number when claiming your document at the barangay.</li>
+                </ul>
+              </div>
+
+              <div className="flex gap-4">
+                <Button asChild className="flex-1">
+                  <Link to="/track">Track My Request</Link>
+                </Button>
+                <Button variant="outline" asChild className="flex-1">
+                  <Link to="/">Back to Home</Link>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -222,7 +282,7 @@ const ZoneClearance = () => {
                       <Input
                         id="existing_clearance_file"
                         type="file"
-                        accept=".pdf,.jpg,.jpeg,.png"
+                        accept="image/*,.pdf"
                         onChange={handleExistingClearanceFileChange}
                         required
                         className="cursor-pointer"
@@ -230,19 +290,19 @@ const ZoneClearance = () => {
                       <Upload className="h-5 w-5 text-muted-foreground" />
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Accepted formats: PDF, JPG, PNG. This will be used to verify your existing clearance.
+                      Accepted formats: Any image or PDF file.
                     </p>
                   </div>
                 )}
 
                 {hasExistingClearance === "no" && (
                   <div className="space-y-2">
-                    <Label htmlFor="valid_id_file">Upload a Valid ID *</Label>
+                    <Label htmlFor="valid_id_file">Upload an Image (ID or any document) *</Label>
                     <div className="flex items-center gap-2">
                       <Input
                         id="valid_id_file"
                         type="file"
-                        accept=".pdf,.jpg,.jpeg,.png"
+                        accept="image/*,.pdf"
                         onChange={handleValidIdFileChange}
                         required
                         className="cursor-pointer"
@@ -250,7 +310,7 @@ const ZoneClearance = () => {
                       <Upload className="h-5 w-5 text-muted-foreground" />
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Accepted formats: PDF, JPG, PNG. Upload any valid government ID (e.g., National ID, Driver's License, Passport, Voter's ID).
+                      Accepted formats: Any image or PDF file. Upload any valid ID or document.
                     </p>
                   </div>
                 )}

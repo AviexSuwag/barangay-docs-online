@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,23 +6,21 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
-import { getZones, createDocumentRequest, saveFile, getApprovedZoneClearance } from "@/lib/offlineDb";
-import { ArrowLeft, Loader2, AlertCircle, Upload } from "lucide-react";
+import { getZones, createDocumentRequest, saveFile, getApprovedZoneClearanceByRefNumber } from "@/lib/offlineDb";
+import { ArrowLeft, Loader2, AlertCircle, Upload, CheckCircle, Copy } from "lucide-react";
 import { Link } from "react-router-dom";
 import Header from "@/components/Header";
 
 const Indigency = () => {
-  const navigate = useNavigate();
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [zones, setZones] = useState<any[]>([]);
-  const [hasZoneClearance, setHasZoneClearance] = useState<string>("");
-  const [verifyMethod, setVerifyMethod] = useState<"email" | "phone" | "">("");
-  const [verifyValue, setVerifyValue] = useState("");
   const [zoneClearanceVerified, setZoneClearanceVerified] = useState(false);
+  const [verifiedZoneClearance, setVerifiedZoneClearance] = useState<any>(null);
+  const [zoneClearanceRefNumber, setZoneClearanceRefNumber] = useState("");
   const [zoneClearanceFile, setZoneClearanceFile] = useState<File | null>(null);
-  const [step, setStep] = useState<"initial" | "verify-method" | "verify-input" | "upload-clearance" | "form">("initial");
+  const [submittedReferenceNumber, setSubmittedReferenceNumber] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchZones = async () => {
@@ -39,60 +36,56 @@ const Indigency = () => {
     }
   };
 
-  const checkZoneClearance = async () => {
-    if (!verifyValue) {
+  const handleVerifyZoneClearance = async () => {
+    if (!zoneClearanceRefNumber.trim()) {
       toast({
-        title: verifyMethod === "email" ? "Email Required" : "Phone Required",
-        description: `Please enter your ${verifyMethod} to verify zone clearance.`,
+        title: "Reference Number Required",
+        description: "Please enter your Zone Clearance reference number.",
         variant: "destructive",
       });
       return;
     }
 
     setVerifying(true);
-    
-    const data = await getApprovedZoneClearance(
-      verifyMethod === "email" ? verifyValue : undefined,
-      verifyMethod === "phone" ? verifyValue : undefined
-    );
+
+    const data = await getApprovedZoneClearanceByRefNumber(zoneClearanceRefNumber);
 
     setVerifying(false);
 
-    if (data) {
-      setZoneClearanceVerified(true);
+    if (!data) {
       toast({
-        title: "Verified!",
-        description: "Zone clearance found. Please upload a picture of your zone clearance.",
-      });
-      setStep("upload-clearance");
-    } else {
-      toast({
-        title: "No Zone Clearance Found",
-        description: `No approved zone clearance found with this ${verifyMethod}. Please request a zone clearance first.`,
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleClearanceUpload = () => {
-    if (!zoneClearanceFile) {
-      toast({
-        title: "File Required",
-        description: "Please upload a picture of your zone clearance.",
+        title: "Not Found or Not Approved",
+        description: "No approved Zone Clearance found with this reference number. Please check the number or wait for approval.",
         variant: "destructive",
       });
       return;
     }
-    setStep("form");
+
+    setZoneClearanceVerified(true);
+    setVerifiedZoneClearance(data);
+    toast({
+      title: "Verified!",
+      description: "Your Zone Clearance has been verified successfully.",
+    });
+  };
+
+  const copyReferenceNumber = () => {
+    if (submittedReferenceNumber) {
+      navigator.clipboard.writeText(submittedReferenceNumber);
+      toast({
+        title: "Copied!",
+        description: "Reference number copied to clipboard.",
+      });
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     
-    if (!zoneClearanceVerified || !zoneClearanceFile) {
+    if (!zoneClearanceVerified) {
       toast({
         title: "Verification Required",
-        description: "Please verify your zone clearance and upload the document first.",
+        description: "Please verify your Zone Clearance reference number first.",
         variant: "destructive",
       });
       return;
@@ -100,8 +93,10 @@ const Indigency = () => {
 
     setLoading(true);
 
-    // Save the zone clearance file locally
-    const fileName = await saveFile(zoneClearanceFile);
+    let fileUrl = null;
+    if (zoneClearanceFile) {
+      fileUrl = await saveFile(zoneClearanceFile);
+    }
 
     const formData = new FormData(e.currentTarget);
     const data = {
@@ -118,16 +113,17 @@ const Indigency = () => {
       document_type: "indigency" as const,
       purpose: formData.get("purpose") as string,
       has_zone_clearance: true,
-      zone_clearance_file_url: fileName,
+      zone_clearance_file_url: fileUrl || undefined,
+      zone_clearance_reference: zoneClearanceRefNumber,
     };
 
     try {
-      await createDocumentRequest(data);
+      const result = await createDocumentRequest(data);
+      setSubmittedReferenceNumber(result.reference_number);
       toast({
         title: "Success!",
-        description: "Your indigency certificate request has been submitted. You will receive a reference number once approved.",
+        description: "Your indigency certificate request has been submitted.",
       });
-      navigate("/");
     } catch (error) {
       toast({
         title: "Error",
@@ -139,240 +135,50 @@ const Indigency = () => {
     setLoading(false);
   };
 
-  // Step 1: Initial question
-  if (step === "initial") {
+  // Success screen with reference number
+  if (submittedReferenceNumber) {
     return (
       <div className="min-h-screen bg-background">
         <Header />
         <main className="container mx-auto px-4 py-12">
-          <Button variant="ghost" asChild className="mb-6">
-            <Link to="/">
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to Home
-            </Link>
-          </Button>
-
           <Card className="max-w-2xl mx-auto">
-            <CardHeader>
-              <CardTitle className="text-3xl">Barangay Indigency Request</CardTitle>
-              <CardDescription>
-                Before proceeding, we need to verify if you have a zone clearance
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <Alert>
-                <AlertCircle className="h-4 w-4" />
-                <AlertDescription>
-                  A zone clearance is required before requesting an indigency certificate.
-                </AlertDescription>
-              </Alert>
-
-              <div className="space-y-4">
-                <Label>Do you have an approved Zone Clearance?</Label>
-                <div className="flex gap-4">
-                  <Button
-                    variant="outline"
-                    className="flex-1"
-                    onClick={() => {
-                      setHasZoneClearance("yes");
-                      setStep("verify-method");
-                    }}
-                  >
-                    Yes, I have one
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="flex-1"
-                    onClick={() => navigate("/request/zone-clearance")}
-                  >
-                    No, request one first
-                  </Button>
-                </div>
+            <CardHeader className="text-center">
+              <div className="flex justify-center mb-4">
+                <CheckCircle className="h-16 w-16 text-success" />
               </div>
-            </CardContent>
-          </Card>
-        </main>
-      </div>
-    );
-  }
-
-  // Step 2: Choose verification method (email or phone)
-  if (step === "verify-method") {
-    return (
-      <div className="min-h-screen bg-background">
-        <Header />
-        <main className="container mx-auto px-4 py-12">
-          <Button variant="ghost" asChild className="mb-6">
-            <Link to="/">
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to Home
-            </Link>
-          </Button>
-
-          <Card className="max-w-2xl mx-auto">
-            <CardHeader>
-              <CardTitle className="text-3xl">Verify Zone Clearance</CardTitle>
+              <CardTitle className="text-3xl">Request Submitted!</CardTitle>
               <CardDescription>
-                How would you like to verify your zone clearance?
+                Your barangay indigency request has been successfully submitted
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              <div className="space-y-4">
-                <Label>Choose verification method:</Label>
-                <div className="flex gap-4">
-                  <Button
-                    variant="outline"
-                    className="flex-1"
-                    onClick={() => {
-                      setVerifyMethod("email");
-                      setStep("verify-input");
-                    }}
-                  >
-                    Verify by Email
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="flex-1"
-                    onClick={() => {
-                      setVerifyMethod("phone");
-                      setStep("verify-input");
-                    }}
-                  >
-                    Verify by Phone
+              <div className="p-6 bg-primary/10 border-2 border-primary/20 rounded-lg text-center">
+                <p className="text-sm font-medium mb-2">Your Reference Number:</p>
+                <div className="flex items-center justify-center gap-2">
+                  <p className="text-3xl font-bold text-primary">{submittedReferenceNumber}</p>
+                  <Button variant="ghost" size="icon" onClick={copyReferenceNumber}>
+                    <Copy className="h-5 w-5" />
                   </Button>
                 </div>
               </div>
 
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={() => setStep("initial")}
-              >
-                Go Back
-              </Button>
-            </CardContent>
-          </Card>
-        </main>
-      </div>
-    );
-  }
-
-  // Step 3: Enter email or phone for verification
-  if (step === "verify-input") {
-    return (
-      <div className="min-h-screen bg-background">
-        <Header />
-        <main className="container mx-auto px-4 py-12">
-          <Button variant="ghost" asChild className="mb-6">
-            <Link to="/">
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to Home
-            </Link>
-          </Button>
-
-          <Card className="max-w-2xl mx-auto">
-            <CardHeader>
-              <CardTitle className="text-3xl">Verify Zone Clearance</CardTitle>
-              <CardDescription>
-                Enter your {verifyMethod === "email" ? "email address" : "phone number"} to verify your approved zone clearance
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-2">
-                <Label htmlFor="verify_input">
-                  {verifyMethod === "email" ? "Email Address" : "Phone Number"} *
-                </Label>
-                <Input
-                  id="verify_input"
-                  type={verifyMethod === "email" ? "email" : "tel"}
-                  value={verifyValue}
-                  onChange={(e) => setVerifyValue(e.target.value)}
-                  placeholder={verifyMethod === "email" ? "Enter your email" : "Enter your phone number"}
-                />
+              <div className="space-y-3 text-sm">
+                <p className="font-medium">Important:</p>
+                <ul className="list-disc list-inside space-y-2 text-muted-foreground">
+                  <li>Save this reference number. You will need it to track your request.</li>
+                  <li>This is a <strong>different</strong> reference number from your Zone Clearance.</li>
+                  <li>Present this reference number when claiming your Barangay Indigency at the barangay.</li>
+                </ul>
               </div>
 
-              <Button onClick={checkZoneClearance} className="w-full" size="lg" disabled={verifying}>
-                {verifying ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Verifying...
-                  </>
-                ) : (
-                  "Verify Zone Clearance"
-                )}
-              </Button>
-
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={() => setStep("verify-method")}
-              >
-                Go Back
-              </Button>
-            </CardContent>
-          </Card>
-        </main>
-      </div>
-    );
-  }
-
-  // Step 4: Upload zone clearance picture
-  if (step === "upload-clearance") {
-    return (
-      <div className="min-h-screen bg-background">
-        <Header />
-        <main className="container mx-auto px-4 py-12">
-          <Button variant="ghost" asChild className="mb-6">
-            <Link to="/">
-              <ArrowLeft className="mr-2 h-4 w-4" />
-              Back to Home
-            </Link>
-          </Button>
-
-          <Card className="max-w-2xl mx-auto">
-            <CardHeader>
-              <CardTitle className="text-3xl">Upload Zone Clearance</CardTitle>
-              <CardDescription>
-                Please upload a picture of your zone clearance document
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <Alert className="bg-green-50 border-green-200">
-                <AlertCircle className="h-4 w-4 text-green-600" />
-                <AlertDescription className="text-green-700">
-                  Zone clearance verified successfully!
-                </AlertDescription>
-              </Alert>
-
-              <div className="space-y-2">
-                <Label htmlFor="zone_clearance_file">Upload Zone Clearance Picture *</Label>
-                <div className="flex items-center gap-2">
-                  <Input
-                    id="zone_clearance_file"
-                    type="file"
-                    accept=".pdf,.jpg,.jpeg,.png"
-                    onChange={handleZoneClearanceFileChange}
-                    required
-                    className="cursor-pointer"
-                  />
-                  <Upload className="h-5 w-5 text-muted-foreground" />
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Accepted formats: PDF, JPG, PNG. Take a clear photo of your zone clearance.
-                </p>
+              <div className="flex gap-4">
+                <Button asChild className="flex-1">
+                  <Link to="/track">Track My Request</Link>
+                </Button>
+                <Button variant="outline" asChild className="flex-1">
+                  <Link to="/">Back to Home</Link>
+                </Button>
               </div>
-
-              <Button onClick={handleClearanceUpload} className="w-full" size="lg">
-                Continue to Form
-              </Button>
-
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={() => setStep("verify-input")}
-              >
-                Go Back
-              </Button>
             </CardContent>
           </Card>
         </main>
@@ -380,7 +186,6 @@ const Indigency = () => {
     );
   }
 
-  // Step 5: Main form
   return (
     <div className="min-h-screen bg-background">
       <Header />
@@ -400,114 +205,219 @@ const Indigency = () => {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Alert className="mb-6 bg-green-50 border-green-200">
-              <AlertCircle className="h-4 w-4 text-green-600" />
-              <AlertDescription className="text-green-700">
-                Zone clearance verified and uploaded successfully!
+            <Alert className="mb-6">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>
+                <strong>Important:</strong> You need an approved Zone Clearance before you can request a Barangay Indigency.
               </AlertDescription>
             </Alert>
 
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="grid md:grid-cols-3 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="first_name">First Name *</Label>
-                  <Input id="first_name" name="first_name" required />
+            {/* Zone Clearance Verification Section */}
+            <div className="space-y-4 p-4 border-2 rounded-lg bg-muted/20 mb-6">
+              <Label className="text-lg font-semibold">Zone Clearance Verification</Label>
+              
+              {!zoneClearanceVerified ? (
+                <div className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    Enter your Zone Clearance reference number to verify:
+                  </p>
+                  <div className="space-y-2">
+                    <Input
+                      placeholder="e.g., ZC-20241210-1234"
+                      value={zoneClearanceRefNumber}
+                      onChange={(e) => setZoneClearanceRefNumber(e.target.value)}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={handleVerifyZoneClearance}
+                      disabled={verifying}
+                      className="w-full"
+                    >
+                      {verifying ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Verifying...
+                        </>
+                      ) : (
+                        "Verify Zone Clearance"
+                      )}
+                    </Button>
+                  </div>
+                  
+                  <Alert>
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription>
+                      Don't have a Zone Clearance yet?{" "}
+                      <Button variant="link" asChild className="p-0 h-auto">
+                        <Link to="/request/zone-clearance">Request one here</Link>
+                      </Button>
+                    </AlertDescription>
+                  </Alert>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="middle_name">Middle Name</Label>
-                  <Input id="middle_name" name="middle_name" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="last_name">Last Name *</Label>
-                  <Input id="last_name" name="last_name" required />
-                </div>
-              </div>
+              ) : (
+                <Alert className="bg-success/10 border-success/20">
+                  <CheckCircle className="h-4 w-4 text-success" />
+                  <AlertDescription className="text-success">
+                    Zone Clearance verified! Reference: <strong>{zoneClearanceRefNumber}</strong>
+                  </AlertDescription>
+                </Alert>
+              )}
+            </div>
 
-              <div className="grid md:grid-cols-2 gap-4">
+            {zoneClearanceVerified && (
+              <form onSubmit={handleSubmit} className="space-y-6">
                 <div className="space-y-2">
-                  <Label htmlFor="age">Age *</Label>
-                  <Input id="age" name="age" type="number" min="1" max="150" required />
+                  <Label htmlFor="zone_clearance_file">Upload Zone Clearance Document (Optional)</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id="zone_clearance_file"
+                      type="file"
+                      accept="image/*,.pdf"
+                      onChange={handleZoneClearanceFileChange}
+                      className="cursor-pointer"
+                    />
+                    <Upload className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Accepted formats: Any image or PDF file
+                  </p>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="birth_date">Birth Date *</Label>
-                  <Input id="birth_date" name="birth_date" type="date" required />
+
+                <div className="grid md:grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="first_name">First Name *</Label>
+                    <Input 
+                      id="first_name" 
+                      name="first_name" 
+                      required 
+                      defaultValue={verifiedZoneClearance?.first_name || ""}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="middle_name">Middle Name</Label>
+                    <Input 
+                      id="middle_name" 
+                      name="middle_name" 
+                      defaultValue={verifiedZoneClearance?.middle_name || ""}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="last_name">Last Name *</Label>
+                    <Input 
+                      id="last_name" 
+                      name="last_name" 
+                      required 
+                      defaultValue={verifiedZoneClearance?.last_name || ""}
+                    />
+                  </div>
                 </div>
-              </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="address">Complete Address *</Label>
-                <Input id="address" name="address" required />
-              </div>
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="age">Age *</Label>
+                    <Input 
+                      id="age" 
+                      name="age" 
+                      type="number" 
+                      min="1" 
+                      max="150" 
+                      required 
+                      defaultValue={verifiedZoneClearance?.age || ""}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="birth_date">Birth Date *</Label>
+                    <Input 
+                      id="birth_date" 
+                      name="birth_date" 
+                      type="date" 
+                      required 
+                      defaultValue={verifiedZoneClearance?.birth_date || ""}
+                    />
+                  </div>
+                </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="zone_id">Zone *</Label>
-                <Select name="zone_id" required>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select your zone" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {zones.map((zone) => (
-                      <SelectItem key={zone.id} value={zone.id}>
-                        {zone.zone_name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="grid md:grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="contact">Contact Number *</Label>
+                  <Label htmlFor="address">Complete Address *</Label>
                   <Input 
-                    id="contact" 
-                    name="contact" 
-                    type="tel" 
+                    id="address" 
+                    name="address" 
                     required 
-                    defaultValue={verifyMethod === "phone" ? verifyValue : ""}
+                    defaultValue={verifiedZoneClearance?.address || ""}
                   />
                 </div>
+
                 <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input 
-                    id="email" 
-                    name="email" 
-                    type="email"
-                    defaultValue={verifyMethod === "email" ? verifyValue : ""}
-                  />
+                  <Label htmlFor="zone_id">Zone *</Label>
+                  <Select name="zone_id" required defaultValue={verifiedZoneClearance?.zone_id || ""}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select your zone" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {zones.map((zone) => (
+                        <SelectItem key={zone.id} value={zone.id}>
+                          {zone.zone_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-              </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="marital_status">Marital Status *</Label>
-                <Select name="marital_status" required>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select marital status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="single">Single</SelectItem>
-                    <SelectItem value="married">Married</SelectItem>
-                    <SelectItem value="widowed">Widowed</SelectItem>
-                    <SelectItem value="separated">Separated</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="contact">Contact Number *</Label>
+                    <Input 
+                      id="contact" 
+                      name="contact" 
+                      type="tel" 
+                      required 
+                      defaultValue={verifiedZoneClearance?.contact || ""}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="email">Email</Label>
+                    <Input 
+                      id="email" 
+                      name="email" 
+                      type="email" 
+                      defaultValue={verifiedZoneClearance?.email || ""}
+                    />
+                  </div>
+                </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="purpose">Purpose *</Label>
-                <Input id="purpose" name="purpose" placeholder="e.g., Financial assistance, Medical assistance" required />
-              </div>
+                <div className="space-y-2">
+                  <Label htmlFor="marital_status">Marital Status *</Label>
+                  <Select name="marital_status" required defaultValue={verifiedZoneClearance?.marital_status || ""}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select marital status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="single">Single</SelectItem>
+                      <SelectItem value="married">Married</SelectItem>
+                      <SelectItem value="widowed">Widowed</SelectItem>
+                      <SelectItem value="separated">Separated</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-              <Button type="submit" className="w-full" size="lg" disabled={loading}>
-                {loading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Submitting...
-                  </>
-                ) : (
-                  "Submit Request"
-                )}
-              </Button>
-            </form>
+                <div className="space-y-2">
+                  <Label htmlFor="purpose">Purpose *</Label>
+                  <Input id="purpose" name="purpose" placeholder="e.g., Medical assistance, Financial aid, School assistance" required />
+                </div>
+
+                <Button type="submit" className="w-full" size="lg" disabled={loading}>
+                  {loading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Submitting...
+                    </>
+                  ) : (
+                    "Submit Request"
+                  )}
+                </Button>
+              </form>
+            )}
           </CardContent>
         </Card>
       </main>
