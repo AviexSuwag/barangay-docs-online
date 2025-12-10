@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { searchDocumentRequests, getZoneById } from "@/lib/offlineDb";
-import { ArrowLeft, Loader2, Search, CheckCircle, XCircle, Clock } from "lucide-react";
+import { ArrowLeft, Loader2, Search, CheckCircle, XCircle, Clock, Copy } from "lucide-react";
 import { Link } from "react-router-dom";
 import Header from "@/components/Header";
 
@@ -22,7 +22,7 @@ const TrackRequest = () => {
     if (!searchValue.trim()) {
       toast({
         title: "Search Required",
-        description: "Please enter your email or phone number to track your request.",
+        description: "Please enter your reference number to track your request.",
         variant: "destructive",
       });
       return;
@@ -45,13 +45,21 @@ const TrackRequest = () => {
     if (requestsWithZones.length === 0) {
       toast({
         title: "No Requests Found",
-        description: "No requests found with this email or phone number.",
+        description: "No requests found with this reference number. Please check and try again.",
       });
       setRequests([]);
       return;
     }
 
     setRequests(requestsWithZones);
+  };
+
+  const copyReferenceNumber = (refNum: string) => {
+    navigator.clipboard.writeText(refNum);
+    toast({
+      title: "Copied!",
+      description: "Reference number copied to clipboard.",
+    });
   };
 
   const getStatusIcon = (status: string) => {
@@ -76,6 +84,19 @@ const TrackRequest = () => {
     }
   };
 
+  const getDocumentTypeLabel = (type: string) => {
+    switch (type) {
+      case "zone_clearance":
+        return "Zone Clearance";
+      case "clearance":
+        return "Barangay Clearance";
+      case "indigency":
+        return "Barangay Indigency";
+      default:
+        return type;
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <Header />
@@ -91,20 +112,20 @@ const TrackRequest = () => {
           <CardHeader>
             <CardTitle className="text-3xl">Track Your Request</CardTitle>
             <CardDescription>
-              Enter your email or phone number to view the status of your document requests
+              Enter your reference number to view the status of your document request
             </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSearch} className="space-y-4 mb-6">
               <div className="space-y-2">
-                <Label htmlFor="track_search">Email or Phone Number</Label>
+                <Label htmlFor="track_search">Reference Number</Label>
                 <div className="flex gap-2">
                   <Input
                     id="track_search"
                     type="text"
                     value={searchValue}
                     onChange={(e) => setSearchValue(e.target.value)}
-                    placeholder="Enter your email or phone number"
+                    placeholder="e.g., ZC-20241210-1234"
                     required
                     className="flex-1"
                   />
@@ -116,12 +137,15 @@ const TrackRequest = () => {
                     )}
                   </Button>
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  Enter the reference number you received when you submitted your request
+                </p>
               </div>
             </form>
 
             {requests.length > 0 && (
               <div className="space-y-4">
-                <h3 className="font-semibold text-lg">Your Requests</h3>
+                <h3 className="font-semibold text-lg">Your Request</h3>
                 {requests.map((request) => (
                   <Card key={request.id}>
                     <CardContent className="pt-6">
@@ -129,8 +153,8 @@ const TrackRequest = () => {
                         <div className="flex items-center gap-3">
                           {getStatusIcon(request.status)}
                           <div>
-                            <p className="font-semibold capitalize">
-                              {request.document_type.replace("_", " ")}
+                            <p className="font-semibold">
+                              {getDocumentTypeLabel(request.document_type)}
                             </p>
                             <p className="text-sm text-muted-foreground">
                               Submitted on {new Date(request.request_date).toLocaleDateString()}
@@ -164,9 +188,18 @@ const TrackRequest = () => {
                       {request.reference_number && (
                         <div className="mt-4 p-4 bg-primary/10 border-2 border-primary/20 rounded-lg">
                           <p className="text-sm font-medium mb-2">Reference Number:</p>
-                          <p className="text-2xl font-bold text-primary mb-2">{request.reference_number}</p>
-                          <p className="text-xs text-muted-foreground">
-                            Please present this reference number when claiming your document at the barangay office.
+                          <div className="flex items-center gap-2">
+                            <p className="text-2xl font-bold text-primary">{request.reference_number}</p>
+                            <Button 
+                              variant="ghost" 
+                              size="icon" 
+                              onClick={() => copyReferenceNumber(request.reference_number)}
+                            >
+                              <Copy className="h-4 w-4" />
+                            </Button>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-2">
+                            Present this reference number when claiming your document at the barangay office.
                           </p>
                         </div>
                       )}
@@ -182,6 +215,14 @@ const TrackRequest = () => {
                         <div className="mt-4 p-3 bg-success/10 rounded-lg">
                           <p className="text-sm text-success">
                             ✓ Your document is ready for pickup at the Barangay Hall during office hours.
+                          </p>
+                        </div>
+                      )}
+
+                      {request.status === "pending" && (
+                        <div className="mt-4 p-3 bg-warning/10 rounded-lg">
+                          <p className="text-sm text-warning">
+                            ⏳ Your request is being processed. Please check back later.
                           </p>
                         </div>
                       )}
